@@ -184,57 +184,6 @@ turbines <- read.csv(file.choose(), header = TRUE)  # WRD_foranalysis.csv
 spec_joined_spatialgrain <- left_join(spec_joined_spatialgrain, turbines, by = "cell_year") %>%
   mutate(WindCount = ifelse(is.na(WindCount), 0, WindCount))
 
-# Load CRP area data and join by seqnum and year
-CRP <- read.csv(file.choose(), header = TRUE)
-CRP$year <- CRP$Year  # match column naming
-spec_joined_spatialgrain <- left_join(spec_joined_spatialgrain,
-                                      CRP %>% select(seqnum, year, CRP_area, CRPGrass_area),
-                                      by = c("seqnum", "year"))
-
-# Load detailed CRP landscape and bird metrics, parse keys, and join
-CRP2 <- read.csv(file.choose(), header = TRUE)[, c(1:9, 11:14, 16:19)]
-CRP2 <- CRP2 %>%
-  separate(cell_year, into = c("seqnum", "year"), sep = "_") %>%
-  mutate(seqnum = as.numeric(seqnum),
-         year = as.numeric(year))
-
-spec_joined_spatialgrain <- left_join(spec_joined_spatialgrain,
-                                      CRP2 %>% select(seqnum, year,
-                                                      Hab_PercentGrassland, Hab_PercentWetland,
-                                                      obj_PercentGrass, obj_PercentWetland, obj_PercentWildlife,
-                                                      brd_PercentAttract, brd_PercentNeutral, brd_PercentAvoid,
-                                                      CRP_largest_patch_index, CRP_patch_density, CRP_edge_density, CRP_contagion,
-                                                      CRPGrass_largest_patch_index, CRPGrass_patch_density, CRPGrass_edge_density, CRPGrass_contagion),
-                                      by = c("seqnum", "year"))
-
-# Assign data_type: control = no wind & no CRP; exp = has wind or CRP
-spec_joined_spatialgrain$data_type <- NA_character_
-spec_joined_spatialgrain$data_type[spec_joined_spatialgrain$CRP_area_ha == 0 & spec_joined_spatialgrain$WindCount == 0] <- "control"
-spec_joined_spatialgrain$data_type[spec_joined_spatialgrain$CRP_area_ha > 0 | spec_joined_spatialgrain$WindCount > 0] <- "exp"
-
-# Separate experimental and control groups
-exp <- spec_joined_spatialgrain %>% filter(data_type == "exp")
-control <- spec_joined_spatialgrain %>% filter(data_type == "control")
-
-# Subsample control points based on Developed covariate relative to experimental points
-control_greaterQ <- control %>% filter(Developed > quantile(exp$Developed, 0.75))
-control_lessQ <- control %>% filter(Developed <= quantile(exp$Developed, 0.75))
-
-# Sample 25% of control points with high Developed values
-GQcount <- floor(0.25 * nrow(control_greaterQ))
-control_greaterQ_ss <- control_greaterQ %>% sample_n(size = GQcount)
-
-# Combine subsampled high Developed controls with lower Developed controls
-control_ss <- bind_rows(control_lessQ, control_greaterQ_ss)
-
-# Sanity checks
-summary(exp$Developed)
-summary(control$Developed)
-summary(control_ss$Developed)
-
-# Recombine experimental data with subsampled controls
-spec_joined_spatialgrain_ss <- bind_rows(control_ss, exp)
-
 # Prevalence after subsampling
 spec_joined_spatialgrain_ss %>%
   count(species_observed) %>%
@@ -242,20 +191,6 @@ spec_joined_spatialgrain_ss %>%
 
 # Final cleaned dataset to be used in downstream analyses
 spec_final <- spec_joined_spatialgrain_ss
-
-# Counts of experimental groups in the final dataset
-spec_final %>%
-  count(CRP_area_ha > 0 & WindCount > 0) %>%
-  mutate(percent = n / sum(n))  # CRP & turbine
-spec_final %>%
-  count(CRP_area_ha > 0 & WindCount == 0) %>%
-  mutate(percent = n / sum(n))  # CRP only
-spec_final %>%
-  count(CRP_area_ha == 0 & WindCount > 0) %>%
-  mutate(percent = n / sum(n))  # turbine only
-spec_final %>%
-  count(CRP_area_ha == 0 & WindCount == 0) %>%
-  mutate(percent = n / sum(n))  # neither CRP nor turbines
 
 
 ##### Part 3: Categorizing Wind Variables
@@ -305,12 +240,7 @@ spec_filtered_spatialgrain <- spec_joined_spatialgrain %>%
 cortest <- spec_filtered_spatialgrain %>%
   select(WindCount,
          Developed, Cropland, GrassShrub, TreeCover, Water, Wetland, Barren, IceSnow,
-         meanStartTime, meanSampDur, meanDIST, meanNumObs,
-         CRP_area, CRP_largest_patch_index, CRP_patch_density, CRP_edge_density, CRP_contagion,
-         CRPGrass_area, CRPGrass_largest_patch_index, CRPGrass_patch_density, CRPGrass_edge_density, CRPGrass_contagion,
-         Hab_PercentGrassland, Hab_PercentWetland,
-         obj_PercentGrass, obj_PercentWetland, obj_PercentWildlife,
-         brd_PercentAttract, brd_PercentNeutral, brd_PercentAvoid)
+         meanStartTime, meanSampDur, meanDIST, meanNumObs)
 
 # Correlation matrix
 corr_matrix <- cor(cortest, use = "complete.obs")
@@ -318,11 +248,7 @@ corr_matrix <- cor(cortest, use = "complete.obs")
 # Reorder columns for visual consistency
 corr_matrix <- corr_matrix[, c(
   "Developed", "Cropland", "GrassShrub", "TreeCover", "Water", "Wetland", "Barren", "IceSnow",
-  "meanStartTime", "meanSampDur", "meanDIST", "meanNumObs", "WindCount",
-  "CRP_area", "CRP_largest_patch_index", "CRP_patch_density", "CRP_edge_density", "CRP_contagion",
-  "CRPGrass_area", "CRPGrass_largest_patch_index", "CRPGrass_patch_density", "CRPGrass_edge_density", "CRPGrass_contagion",
-  "Hab_PercentGrassland", "Hab_PercentWetland", "obj_PercentGrass", "obj_PercentWetland", "obj_PercentWildlife",
-  "brd_PercentAttract", "brd_PercentNeutral", "brd_PercentAvoid"
+  "meanStartTime", "meanSampDur", "meanDIST", "meanNumObs", "WindCount"
 )]
 
 # Save
@@ -333,13 +259,7 @@ write.csv(corr_matrix, "spec_corr_matrix.csv", row.names = TRUE)
 scaled_cols <- spec_filtered_spatialgrain %>%
   select(meanStartTime, meanSampDur, meanDIST, meanNumObs,
          Developed, Cropland, GrassShrub, TreeCover, Water, Wetland, Barren, IceSnow,
-         WindCount,
-         Hab_PercentGrassland, Hab_PercentWetland,
-         CRP_area, CRP_largest_patch_index, CRP_patch_density, CRP_edge_density, CRP_contagion,
-         CRPGrass_area, CRPGrass_largest_patch_index, CRPGrass_patch_density, CRPGrass_edge_density, CRPGrass_contagion,
-         obj_PercentGrass, obj_PercentWetland, obj_PercentWildlife,
-         brd_PercentAttract, brd_PercentNeutral, brd_PercentAvoid,
-         Lat, Long)
+         WindCount, Lat, Long)
 
 # Save scaling parameters
 scaling_params <- scaled_cols %>%
@@ -370,11 +290,6 @@ spec_split_spatialgrain <- spec_scaled_spatialgrain %>%
          meanStartTime, meanSampDur, meanDIST, meanNumObs,
          Developed, Cropland, GrassShrub, TreeCover, Water, Wetland, Barren, IceSnow,
          WindCount, WindHeight, WindCap, WindAge, WindPA, WindRSA,
-         Hab_PercentGrassland, Hab_PercentWetland,
-         CRP_area, CRP_largest_patch_index, CRP_patch_density, CRP_edge_density, CRP_contagion,
-         CRPGrass_area, CRPGrass_largest_patch_index, CRPGrass_patch_density, CRPGrass_edge_density, CRPGrass_contagion,
-         obj_PercentGrass, obj_PercentWetland, obj_PercentWildlife,
-         brd_PercentAttract, brd_PercentNeutral, brd_PercentAvoid,
          Lat, Long)
 
 # Random 80/20 split
@@ -617,151 +532,6 @@ summary(m_wind_age_simple)
 
 MuMIn::AICc(m_wind_count_simple, m_wind_cap_simple, m_Wind_windPA_simple, m_wind_rsa_simple, m_wind_height_simple, m_wind_age_simple, m_lc_base)
 
-# CRP Model Formula
-CRP_Hab_PercentGrassland_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(Hab_PercentGrassland, k = 5)
-CRP_Hab_PercentWetland_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(Hab_PercentWetland, k = 5)
-CRP_CRP_area_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRP_area, k = 5)
-CRP_CRP_largest_patch_index_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRP_largest_patch_index, k = 5)
-CRP_CRP_patch_density_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRP_patch_density, k = 5)
-CRP_CRP_edge_density_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRP_edge_density, k = 5)
-CRP_CRP_contagion_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRP_contagion, k = 5)
-CRP_CRPGrass_area_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRPGrass_area, k = 5)
-CRP_CRPGrass_largest_patch_index_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRPGrass_largest_patch_index, k = 5)
-CRP_CRPGrass_patch_density_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRPGrass_patch_density, k = 5)
-CRP_CRPGrass_edge_density_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRPGrass_edge_density, k = 5)
-CRP_CRPGrass_contagion_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(CRPGrass_contagion, k = 5)
-CRP_obj_PercentGrass_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(obj_PercentGrass, k = 5)
-CRP_obj_PercentWetland_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(obj_PercentWetland, k = 5)
-CRP_obj_PercentWildlife_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(obj_PercentWildlife, k = 5)
-CRP_brd_PercentAttract_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(brd_PercentAttract, k = 5)
-CRP_brd_PercentNeutral_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(brd_PercentNeutral, k = 5)
-CRP_brd_PercentAvoid_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5) + s(brd_PercentAvoid, k = 5)
-CRP_base_simple <- meanCount ~ s(Lat, k = 5) + s(Long, k = 5)
-
-# Fit GAMs and record timing
-start.time <- Sys.time()
-m_CRP_Hab_PercentGrassland_simple <- gam(CRP_Hab_PercentGrassland_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_Hab_PercentGrassland_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_Hab_PercentGrassland_simple)
-
-start.time <- Sys.time()
-m_CRP_Hab_PercentWetland_simple <- gam(CRP_Hab_PercentWetland_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_Hab_PercentWetland_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_Hab_PercentWetland_simple)
-
-start.time <- Sys.time()
-m_CRP_CRP_area_simple <- gam(CRP_CRP_area_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_area_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_area_simple)
-
-start.time <- Sys.time()
-m_CRP_CRP_largest_patch_index_simple <- gam(CRP_CRP_largest_patch_index_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_largest_patch_index_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_largest_patch_index_simple)
-
-start.time <- Sys.time()
-m_CRP_CRP_patch_density_simple <- gam(CRP_CRP_patch_density_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_patch_density_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_patch_density_simple)
-
-start.time <- Sys.time()
-m_CRP_CRP_edge_density_simple <- gam(CRP_CRP_edge_density_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_edge_density_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_edge_density_simple)
-
-start.time <- Sys.time()
-m_CRP_CRP_contagion_simple <- gam(CRP_CRP_contagion_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_contagion_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_contagion_simple)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_area_simple <- gam(CRP_CRPGrass_area_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_area_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_area_simple)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_largest_patch_index_simple <- gam(CRP_CRPGrass_largest_patch_index_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_largest_patch_index_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_largest_patch_index_simple)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_patch_density_simple <- gam(CRP_CRPGrass_patch_density_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_patch_density_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_patch_density_simple)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_edge_density_simple <- gam(CRP_CRPGrass_edge_density_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_edge_density_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_edge_density_simple)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_contagion_simple <- gam(CRP_CRPGrass_contagion_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_contagion_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_contagion_simple)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentGrass_simple <- gam(CRP_obj_PercentGrass_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentGrass_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentGrass_simple)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentWetland_simple <- gam(CRP_obj_PercentWetland_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentWetland_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentWetland_simple)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentWildlife_simple <- gam(CRP_obj_PercentWildlife_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentWildlife_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentWildlife_simple)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentAttract_simple <- gam(CRP_brd_PercentAttract_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentAttract_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentAttract_simple)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentNeutral_simple <- gam(CRP_brd_PercentNeutral_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentNeutral_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentNeutral_simple)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentAvoid_simple <- gam(CRP_brd_PercentAvoid_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentAvoid_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentAvoid_simple)
-
-start.time <- Sys.time()
-m_CRP_base_simple <- gam(CRP_base_simple, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_base_simple:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_base_simple)
-
-MuMIn::AICc(
-  m_CRP_Hab_PercentGrassland_simple, m_CRP_Hab_PercentWetland_simple,
-  m_CRP_CRP_area_simple, m_CRP_CRP_largest_patch_index_simple, m_CRP_CRP_patch_density_simple, m_CRP_CRP_edge_density_simple, m_CRP_CRP_contagion_simple,
-  m_CRP_CRPGrass_area_simple, m_CRP_CRPGrass_largest_patch_index_simple, m_CRP_CRPGrass_patch_density_simple, m_CRP_CRPGrass_edge_density_simple, m_CRP_CRPGrass_contagion_simple,
-  m_CRP_obj_PercentGrass_simple, m_CRP_obj_PercentWetland_simple, m_CRP_obj_PercentWildlife_simple,
-  m_CRP_brd_PercentAttract_simple, m_CRP_brd_PercentNeutral_simple, m_CRP_brd_PercentAvoid_simple,
-  m_CRP_base_simple
-)
-
 
 ##### Part 9: Wind Only Models with Effort and Land Cover Variables
 # Model formulas
@@ -859,376 +629,23 @@ summary(m_wind_base)
 
 MuMIn::AICc(m_wind_count, m_wind_cap, m_Wind_windPA, m_wind_rsa, m_wind_height, m_wind_age, m_wind_base)
 
-##### Part 10: Conservation Reserve Program Only Models with Effort and Land Cover Variables
-CRP_Hab_PercentGrassland <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(Hab_PercentGrassland, k = 5)
-CRP_Hab_PercentWetland <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(Hab_PercentWetland, k = 5)
-CRP_CRP_area <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRP_area, k = 5)
-CRP_CRP_largest_patch_index <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRP_largest_patch_index, k = 5)
-CRP_CRP_patch_density <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRP_patch_density, k = 5)
-CRP_CRP_edge_density <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRP_edge_density, k = 5)
-CRP_CRP_contagion <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRP_contagion, k = 5)
-CRP_CRPGrass_area <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRPGrass_area, k = 5)
-CRP_CRPGrass_largest_patch_index <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRPGrass_largest_patch_index, k = 5)
-CRP_CRPGrass_patch_density <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRPGrass_patch_density, k = 5)
-CRP_CRPGrass_edge_density <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRPGrass_edge_density, k = 5)
-CRP_CRPGrass_contagion <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(CRPGrass_contagion, k = 5)
-CRP_obj_PercentGrass <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(obj_PercentGrass, k = 5)
-CRP_obj_PercentWetland <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(obj_PercentWetland, k = 5)
-CRP_obj_PercentWildlife <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(obj_PercentWildlife, k = 5)
-CRP_brd_PercentAttract <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(brd_PercentAttract, k = 5)
-CRP_brd_PercentNeutral <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(brd_PercentNeutral, k = 5)
-CRP_brd_PercentAvoid <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5) +
-  s(brd_PercentAvoid, k = 5)
-CRP_base <- meanCount ~
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) + s(Lat, k = 5) + s(Long, k = 5)
-
-# Fit GAMs and record time for each model
-start.time <- Sys.time()
-m_CRP_Hab_PercentGrassland <- gam(CRP_Hab_PercentGrassland, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_Hab_PercentGrassland:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_Hab_PercentGrassland)
-
-start.time <- Sys.time()
-m_CRP_Hab_PercentWetland <- gam(CRP_Hab_PercentWetland, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_Hab_PercentWetland:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_Hab_PercentWetland)
-
-start.time <- Sys.time()
-m_CRP_CRP_area <- gam(CRP_CRP_area, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_area:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_area)
-
-start.time <- Sys.time()
-m_CRP_CRP_largest_patch_index <- gam(CRP_CRP_largest_patch_index, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_largest_patch_index:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_largest_patch_index)
-
-start.time <- Sys.time()
-m_CRP_CRP_patch_density <- gam(CRP_CRP_patch_density, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_patch_density:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_patch_density)
-
-start.time <- Sys.time()
-m_CRP_CRP_edge_density <- gam(CRP_CRP_edge_density, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_edge_density:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_edge_density)
-
-start.time <- Sys.time()
-m_CRP_CRP_contagion <- gam(CRP_CRP_contagion, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRP_contagion:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRP_contagion)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_area <- gam(CRP_CRPGrass_area, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_area:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_area)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_largest_patch_index <- gam(CRP_CRPGrass_largest_patch_index, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_largest_patch_index:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_largest_patch_index)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_patch_density <- gam(CRP_CRPGrass_patch_density, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_patch_density:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_patch_density)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_edge_density <- gam(CRP_CRPGrass_edge_density, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_edge_density:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_edge_density)
-
-start.time <- Sys.time()
-m_CRP_CRPGrass_contagion <- gam(CRP_CRPGrass_contagion, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_CRPGrass_contagion:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_CRPGrass_contagion)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentGrass <- gam(CRP_obj_PercentGrass, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentGrass:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentGrass)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentWetland <- gam(CRP_obj_PercentWetland, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentWetland:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentWetland)
-
-start.time <- Sys.time()
-m_CRP_obj_PercentWildlife <- gam(CRP_obj_PercentWildlife, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_obj_PercentWildlife:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_obj_PercentWildlife)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentAttract <- gam(CRP_brd_PercentAttract, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentAttract:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentAttract)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentNeutral <- gam(CRP_brd_PercentNeutral, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentNeutral:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentNeutral)
-
-start.time <- Sys.time()
-m_CRP_brd_PercentAvoid <- gam(CRP_brd_PercentAvoid, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_brd_PercentAvoid:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_brd_PercentAvoid)
-
-start.time <- Sys.time()
-m_CRP_base <- gam(CRP_base, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_CRP_base:", round(end.time - start.time, 2), "seconds\n")
-summary(m_CRP_base)
-
-# Compare all models by AICc
-MuMIn::AICc(
-  m_CRP_Hab_PercentGrassland, m_CRP_Hab_PercentWetland,
-  m_CRP_CRP_area, m_CRP_CRP_largest_patch_index, m_CRP_CRP_patch_density, m_CRP_CRP_edge_density, m_CRP_CRP_contagion,
-  m_CRP_CRPGrass_area, m_CRP_CRPGrass_largest_patch_index, m_CRP_CRPGrass_patch_density, m_CRP_CRPGrass_edge_density, m_CRP_CRPGrass_contagion,
-  m_CRP_obj_PercentGrass, m_CRP_obj_PercentWetland, m_CRP_obj_PercentWildlife,
-  m_CRP_brd_PercentAttract, m_CRP_brd_PercentNeutral, m_CRP_brd_PercentAvoid,
-  m_CRP_base
-)
-
-
-##### Part 11: Combined Wind and CRP Models Using Generic Placeholders Instead of Specific Variables
-# Model Formulas
-# 1. Categorical wind variable only
-wind_categorical_model <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  factor(wind_variable)
-
-# 2. Nonlinear (smooth) wind variable only
-wind_nonlinear_model <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  s(wind_variable, k = 5)
-
-# 3. Nonlinear (smooth) CRP variable only
-crp_model <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  s(crp_variable, k = 5)
-
-# 4. Interaction: categorical wind × nonlinear CRP
-interaction_model <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  factor(wind_variable) + s(crp_variable, k = 5) + factor(wind_variable):crp_variable
-
-# 5. Interaction: nonlinear wind × nonlinear CRP (tensor product)
-interaction_model_smooths <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  te(wind_variable, crp_variable, k = 5)
-
-# 6. Additive: categorical wind + nonlinear CRP
-additive_model <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  factor(wind_variable) + s(crp_variable, k = 5)
-
-# 7. Additive: nonlinear wind + nonlinear CRP
-additive_model_smooths <- meanCount ~ 
-  s(meanSampDur, k = 5) + s(meanNumObs, k = 5) + s(meanDIST, k = 5) +
-  s(meanStartTime, bs = "cc", k = 7) +
-  s(Developed, k = 5) + s(TreeCover, k = 5) + s(Water, k = 5) + Wetland +
-  s(Barren, k = 5) + s(IceSnow, k = 5) +
-  s(Lat, k = 5) + s(Long, k = 5) +
-  s(wind_variable, k = 5) + s(crp_variable, k = 5)
-
-# Model Fitting
-m_wind_categorical <- gam(wind_categorical_model, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-summary(m_wind_categorical)
-
-m_wind_nonlinear <- gam(wind_nonlinear_model, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-summary(m_wind_nonlinear)
-
-m_crp <- gam(crp_model, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-summary(m_crp)
-
-start.time <- Sys.time()
-m_interaction <- gam(interaction_model, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_interaction:", round(end.time - start.time, 2), "seconds\n")
-summary(m_interaction)
-
-start.time <- Sys.time()
-m_interaction_smooths <- gam(interaction_model_smooths, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_interaction_smooths:", round(end.time - start.time, 2), "seconds\n")
-summary(m_interaction_smooths)
-
-start.time <- Sys.time()
-m_additive <- gam(additive_model, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_additive:", round(end.time - start.time, 2), "seconds\n")
-summary(m_additive)
-
-start.time <- Sys.time()
-m_additive_smooths <- gam(additive_model_smooths, data = spec_split_spatialgrain$train, family = "nb", knots = time_knots)
-end.time <- Sys.time()
-cat("Time for m_additive_smooths:", round(end.time - start.time, 2), "seconds\n")
-summary(m_additive_smooths)
-
-# Model Comparison using AICc
-MuMIn::AICc(m_wind_categorical, m_wind_nonlinear, m_crp, m_interaction, m_interaction_smooths, m_additive, m_additive_smooths)
-
-
-##### Part 12: Top Model Diagnostics
+##### Part 10: Top Model Diagnostics
 # Variance Components (rescaled)
 gam.vcomp(m_wind, rescale = TRUE)
-gam.vcomp(m_crp, rescale = TRUE)
-gam.vcomp(m_interaction, rescale = TRUE)
-gam.vcomp(m_additive, rescale = TRUE)
 
-# Model Comparison ANOVA
+# Model ANOVA
 anova(m_wind)
-anova(m_crp)
-anova(m_interaction)
-anova(m_additive)
 
 # Default Diagnostic Plot
-plot(m_interaction)  # or replace with any one of: m_wind, m_crp, m_additive
+plot(m_wind)
 
 
-##### Part 13: Figure Generation
-# Extract scaling parameters for crp_variable or continuous wind variable (assumes standardized inputs)
+##### Part 11: Figure Generation
+# Extract scaling parameters for continuous wind variable (assumes standardized inputs)
 scaling_params_sub <- scaling_params %>%
-  filter(variable %in% c("crp_variable", "wind_variable"))
+  filter(variable %in% c("wind_variable"))
 
 # Create unstandardized variable in test set for plotting
-spec_split_spatialgrain$test$crp_variable_unscaled <- spec_split_spatialgrain$test$crp_variable *
-  scaling_params_sub$sd[scaling_params_sub$variable == "crp_variable"] +
-  scaling_params_sub$mean[scaling_params_sub$variable == "crp_variable"]
 spec_split_spatialgrain$test$wind_variable_unscaled <- spec_split_spatialgrain$test$wind_variable *
   scaling_params_sub$sd[scaling_params_sub$variable == "wind_variable"] +
   scaling_params_sub$mean[scaling_params_sub$variable == "wind_variable"]
@@ -1256,67 +673,4 @@ pred_df_wind_cat$predicted <- pred_wind_cat$fit
 ggplot(pred_df_wind_cat, aes(x = wind_variable, y = predicted)) +
   geom_boxplot() +
   labs(x = "Wind Variable", y = "Predicted Abundance") +
-  theme_minimal()
-
-# 3. Continuous CRP Variable Only Figure
-# Predict and plot from crp-only model
-pred_crp <- predict.gam(m_crp, newdata = spec_split_spatialgrain$test,
-                        type = "response", se.fit = TRUE, allow.new.levels = TRUE)
-
-pred_df_crp <- spec_split_spatialgrain$test
-pred_df_crp$predicted <- pred_crp$fit
-
-ggplot(pred_df_crp, aes(x = crp_variable_unscaled, y = predicted)) +
-  geom_smooth() +
-  labs(x = "CRP Variable", y = "Predicted Abundance") +
-  theme_minimal()
-
-# 4. Additive Figure with Categorical Wind and Continuous CRP
-pred_add_cat <- predict.gam(m_additive, newdata = spec_split_spatialgrain$test,
-                            type = "response", se.fit = TRUE, allow.new.levels = TRUE)
-
-pred_df_add_cat <- spec_split_spatialgrain$test
-pred_df_add_cat$predicted <- pred_add_cat$fit
-
-ggplot(pred_df_add_cat, aes(x = crp_variable_unscaled, y = predicted, color = wind_variable)) +
-  geom_smooth() +
-  labs(x = "CRP Variable", y = "Predicted Abundance", color = "Wind Variable") +
-  theme_minimal()
-
-# 5. Additive Figure with Continuous Wind and Continuous CRP
-pred_add_nl <- predict.gam(m_additive_smooths, newdata = spec_split_spatialgrain$test,
-                           type = "response", se.fit = TRUE, allow.new.levels = TRUE)
-
-pred_df_add_nl <- spec_split_spatialgrain$test
-pred_df_add_nl$predicted <- pred_add_nl$fit
-
-ggplot(pred_df_add_nl, aes(x = crp_variable_unscaled, y = predicted, color = wind_variable)) +
-  geom_point(alpha = 0.3) +
-  geom_smooth() +
-  labs(x = "CRP Variable", y = "Predicted Abundance", color = "Wind Variable") +
-  theme_minimal()
-
-# 6. Interaction Figure with Categorical Wind and Continuous CRP
-pred_inter_cat <- predict.gam(m_interaction, newdata = spec_split_spatialgrain$test,
-                              type = "response", se.fit = TRUE, allow.new.levels = TRUE)
-
-pred_df_inter_cat <- spec_split_spatialgrain$test
-pred_df_inter_cat$predicted <- pred_inter_cat$fit
-
-ggplot(pred_df_inter_cat, aes(x = crp_variable_unscaled, y = predicted, color = wind_variable)) +
-  geom_smooth() +
-  labs(x = "CRP Variable", y = "Predicted Abundance", color = "Wind Variable") +
-  theme_minimal()
-
-# 7. Interaction Figure with Continuous Wind and Continuous CRP
-pred_inter_smooth <- predict.gam(m_interaction_smooths, newdata = spec_split_spatialgrain$test,
-                                 type = "response", se.fit = TRUE, allow.new.levels = TRUE)
-
-pred_df_inter_smooth <- spec_split_spatialgrain$test
-pred_df_inter_smooth$predicted <- pred_inter_smooth$fit
-
-# Use 2D smoother to visualize interaction (wind and CRP)
-ggplot(pred_df_inter_smooth, aes(x = wind_variable, y = crp_variable_unscaled, fill = predicted)) +
-  geom_tile() +
-  labs(x = "Wind Variable", y = "CRP Variable", fill = "Predicted Abundance") +
   theme_minimal()
